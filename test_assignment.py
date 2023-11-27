@@ -8,26 +8,30 @@ PREFS = ["yes", "maybe", "no"]
 
 def main():
     from argparse import ArgumentParser
-    parser = ArgumentParser()
-    parser.add_argument("input_dirpath")
-    parser.add_argument("pc_filepath")
-    parser.add_argument("input_filepath")
-    parser.add_argument("output_filepath")
-    parser.add_argument("--assign_num", type=int, required=True)
-    parser.add_argument("--default_max", type=int, required=True)
-    parser.add_argument("--country_coi_max", type=int, required=True)
-    parser.add_argument("--no_strict", action="store_true")
+    parser = ArgumentParser(description="This script outputs the assignment statistics.")
+    parser.add_argument("input_dirpath", help="Directory where files from EasyChair are located.")
+    parser.add_argument("pc_filepath", help="Excel file containing PC or SPC members.")
+    parser.add_argument("input_filepath", help="CSV file output by assing.py")
+    parser.add_argument("output_filepath", help="Excel file including the assignment statistics.")
+    parser.add_argument("--assign_num", type=int, required=True,
+                        help="Number of reviewers per paper.")
+    parser.add_argument("--default_max", type=int, required=True,
+                        help="Default value of the maximum number of papers per reviewer.")
+    parser.add_argument("--country_coi_max", type=int, required=True,
+                        help="Maximum number of reviewers per paper who "
+                        "belong to the same country/region as the authors "
+                        "of the paper.")
     args = parser.parse_args()
 
     result_stat = []
 
     paper_filepath = os.path.join(args.input_dirpath, "easychair.xlsx")
-    paper_df = pd.read_excel(paper_filepath, "Submissions")
-    author_df = pd.read_excel(paper_filepath, "Authors")
+    paper_df = pd.read_excel(paper_filepath, "Submissions", engine='openpyxl')
+    author_df = pd.read_excel(paper_filepath, "Authors", engine='openpyxl')
     paper_ids = paper_df["#"].astype(int).tolist()
     paper_df.set_index("#", inplace=True)
 
-    pc_df = pd.read_excel(args.pc_filepath)
+    pc_df = pd.read_excel(args.pc_filepath, engine='openpyxl')
     pc_num = len(pc_df)
     reviewer_filepath = os.path.join(args.input_dirpath, "reviewer.csv")
     rev_df = pd.read_csv(reviewer_filepath, header=None)
@@ -43,9 +47,8 @@ def main():
     rev_papers = defaultdict(set)
     paper_revs = defaultdict(set)
     for idx, (rid, pid) in assign_df.iterrows():
-        if not args.no_strict or rid in reviewer_ids_set:
-            rev_papers[rid].add(pid)
-            paper_revs[pid].add(rid)
+        rev_papers[rid].add(pid)
+        paper_revs[pid].add(rid)
     
     assert set(rev_papers).issubset(set(reviewer_ids))
     result_stat.append(["# of reviewers", len(set(reviewer_ids))])

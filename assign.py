@@ -10,12 +10,9 @@ from collections import defaultdict
 TIME_LIMIT = 60 * 60
 BID_SCORE = 1000
 
-MAX_LAST_MINUTE_REVIEWER_NUM = 1
-
 def model(paper_ids, reviewer_ids, assignments, scores, min_max,
-          country_coi, country_pcs, last_minutes,
-          assign_num, country_coi_max, max_no_bid_str,
-          most_freq_country):
+          country_coi, country_pcs,
+          assign_num, country_coi_max, max_no_bid_str):
     m = mip.Model(name='paper_assignment')
 
     # vars
@@ -36,11 +33,6 @@ def model(paper_ids, reviewer_ids, assignments, scores, min_max,
                 mip.xsum(assignment_vars[(r, p)] for r in reviewer_ids 
                          if r in country_coi[p]) <= country_coi_max,
                 name=f"Con_Country({p})")
-        for country in country_pcs:
-            m.add_constr(
-                    mip.xsum(assignment_vars[(r, p)] for r in reviewer_ids 
-                            if r in country_pcs[country]) <= most_freq_country,
-                    name=f"Con_PC_Country({country},{p})")
 
     for r in reviewer_ids:
         min_num, max_num = min_max[r]
@@ -50,12 +42,6 @@ def model(paper_ids, reviewer_ids, assignments, scores, min_max,
         m.add_constr(
                 mip.xsum(assignment_vars[(r, p)] for p in paper_ids) >= min_num,
                 name=f"Con_MIN({r})")
-
-    for p in paper_ids:
-        m.add_constr(
-                mip.xsum(assignment_vars[(r, p)] for r in reviewer_ids 
-                         if r in last_minutes) <= MAX_LAST_MINUTE_REVIEWER_NUM,
-                name=f"Con_Last({p})")
 
     if max_no_bid_str:
         max_no_bid_settings = read_max_no_bid_str(max_no_bid_str)
@@ -69,7 +55,7 @@ def model(paper_ids, reviewer_ids, assignments, scores, min_max,
                                     if scores[r][p] < BID_SCORE) <= max_no_bid,
                             name=f"Con_Max_No_Bid({r})")
                     break
-
+    
     return m
 
 
@@ -84,7 +70,7 @@ def read_max_no_bid_str(s):
 
 
 def read_reviewers(pc_filepath, reviewer_filepath):
-    pc_df = pd.read_excel(pc_filepath)
+    pc_df = pd.read_excel(pc_filepath, engine='openpyxl')
     rev_df = pd.read_csv(reviewer_filepath, header=None)
     rev_df.columns = ["id", "name", "email", "role"]
 
@@ -100,7 +86,7 @@ def get_max_num(pc_df, default_max):
 
 def read_scores(score_filepath):
     scores = defaultdict(lambda: defaultdict(int))
-    score_df = pd.read_excel(score_filepath)
+    score_df = pd.read_excel(score_filepath, engine='openpyxl')
     for idx, (rid, pid, score) in score_df.iterrows():
         rid, pid, score = int(rid), int(pid), int(score)
         scores[rid][pid] = score
@@ -108,8 +94,8 @@ def read_scores(score_filepath):
 
 def find_country_coi(input_dirpath):
     easychair_filepath = os.path.join(input_dirpath, "easychair.xlsx")
-    pc_df = pd.read_excel(easychair_filepath, "Program committee")
-    author_df = pd.read_excel(easychair_filepath, "Authors")
+    pc_df = pd.read_excel(easychair_filepath, "Program committee", engine='openpyxl')
+    author_df = pd.read_excel(easychair_filepath, "Authors", engine='openpyxl')
 
     paper_countries = defaultdict(set)
     for idx, (pid, country) in author_df[["submission #", "country"]].iterrows():
@@ -130,7 +116,7 @@ def find_country_coi(input_dirpath):
 
 def find_country_pcs(input_dirpath):
     easychair_filepath = os.path.join(input_dirpath, "easychair.xlsx")
-    pc_df = pd.read_excel(easychair_filepath, "Program committee")
+    pc_df = pd.read_excel(easychair_filepath, "Program committee", engine='openpyxl')
 
     rev_filepath = os.path.join(input_dirpath, "reviewer.csv")
     rev_df = pd.read_csv(rev_filepath, header=None)
@@ -143,31 +129,30 @@ def find_country_pcs(input_dirpath):
     return country_pcs
 
 
-def find_last_minute_reviewers(pc_df):
-    last_minutes = set()
-    if "last" in pc_df.columns:
-        for idx, (rid, last) in pc_df[["id", "last"]].iterrows():
-            if last == 1:
-                last_minutes.add(rid)
-    return last_minutes
-
-
 def main():
     from argparse import ArgumentParser
-    parser = ArgumentParser()
-    parser.add_argument("pc_filepath")
-    parser.add_argument("input_dirpath")
-    parser.add_argument("output_filepath")
-    parser.add_argument("--assign_num", type=int, required=True)
-    parser.add_argument("--default_min", type=int, required=True)
-    parser.add_argument("--default_max", type=int, required=True)
-    parser.add_argument("--country_coi_max", type=int, required=True)
-    parser.add_argument("--most_freq_country", type=int, required=True)
-    parser.add_argument("--max_no_bid", type=str, default=None)
+    parser = ArgumentParser(description="This script outputs the optimal assignment under given constraints.")
+    parser.add_argument("pc_filepath", help="Excel file containing PC or SPC members.")
+    parser.add_argument("input_dirpath", help="Directory where files from EasyChair are located.")
+    parser.add_argument("output_filepath", help="CSV file including the output assignments.")
+    parser.add_argument("--assign_num", type=int, required=True,
+                        help="Number of reviewers per paper.")
+    parser.add_argument("--default_min", type=int, required=True,
+                        help="Default value of the minimum number of papers per reviewer.")
+    parser.add_argument("--default_max", type=int, required=True,
+                        help="Default value of the maximum number of papers per reviewer.")
+    parser.add_argument("--country_coi_max", type=int, required=True,
+                        help="Maximum number of reviewers per paper who "
+                        "belong to the same country/region as the authors "
+                        "of the paper.")
+    parser.add_argument("--max_no_bid", type=str, default=None,
+                        help="Format: [min_bid_num1]:[max_no_bid1],[min_bid_num2]:[max_no_bid2],... "
+                        "A special constraint that only [max_no_bid] or fewer papers are assigned to "
+                        "reviewers who bid [min_bid_num] or more papers.")
     args = parser.parse_args()
 
     paper_filepath = os.path.join(args.input_dirpath, "easychair.xlsx")
-    paper_df = pd.read_excel(paper_filepath, "Submissions")
+    paper_df = pd.read_excel(paper_filepath, "Submissions", engine='openpyxl')
     paper_ids = paper_df["#"].astype(int).tolist()
     reviewer_filepath = os.path.join(args.input_dirpath, "reviewer.csv")
     pc_df = read_reviewers(args.pc_filepath, reviewer_filepath)
@@ -185,12 +170,10 @@ def main():
 
     country_coi = find_country_coi(args.input_dirpath)
     country_pcs = find_country_pcs(args.input_dirpath)
-    last_minutes = find_last_minute_reviewers(pc_df)
 
     m = model(paper_ids, reviewer_ids, assignments, scores,
-              min_max, country_coi, country_pcs, last_minutes,
-              args.assign_num, args.country_coi_max, args.max_no_bid,
-              args.most_freq_country)
+              min_max, country_coi, country_pcs, 
+              args.assign_num, args.country_coi_max, args.max_no_bid)
 
     m.threads = -1
     status = m.optimize(max_seconds=TIME_LIMIT)

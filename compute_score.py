@@ -1,12 +1,7 @@
 import pandas as pd
 import os
 from collections import defaultdict
-
-SCORES = {
-    "maybe": 1000, "yes": 1500, 
-    "topic": 10,
-    "conflict": -1000000
-}
+from settings import ASSIGNMENT_SCORES
 
 def parse_topics(df):
     topics = defaultdict(set)
@@ -28,7 +23,7 @@ def add_topic_score(input_dirpath):
         for pid in paper_topics:
             fit = len(rev_topics[rid] & paper_topics[pid])
             if fit > 0:
-                score = fit * SCORES["topic"]
+                score = fit * ASSIGNMENT_SCORES["topic"]
                 topic_scores.append([rid, pid, score])
     topic_score_df = pd.DataFrame(topic_scores, columns=["rid", "pid", "score"])
     return topic_score_df
@@ -45,8 +40,10 @@ def merge_score_dfs(dfs):
 
 if __name__ == '__main__':
     from argparse import ArgumentParser
-    parser = ArgumentParser()
-    parser.add_argument("input_dirpath")
+    parser = ArgumentParser(description="This script computes the score of each assignment. "
+                            "The scores are output in [input_dirpath]/score.xlsx")
+    parser.add_argument("input_dirpath",
+                        help="The directory where files from EasyChair are located.")
     args = parser.parse_args()
 
     # topical fit
@@ -56,14 +53,14 @@ if __name__ == '__main__':
     bid_filepath = os.path.join(args.input_dirpath, "bid.csv")
     bid_df = pd.read_csv(bid_filepath, header=None)
     bid_df.columns = ["rid", "pid", "pref"]
-    bid_df["score"] = bid_df.pref.apply(lambda x: SCORES[x])
+    bid_df["score"] = bid_df.pref.apply(lambda x: ASSIGNMENT_SCORES[x])
     bid_df = bid_df[["rid", "pid", "score"]]
 
     # declared COI
     coi_filepath = os.path.join(args.input_dirpath, "conflict.csv")
     coi_df = pd.read_csv(coi_filepath, header=None)
     coi_df.columns = ["rid", "pid"]
-    coi_df["score"] = SCORES["conflict"]
+    coi_df["score"] = ASSIGNMENT_SCORES["conflict"]
 
     score_df = merge_score_dfs([topic_score_df, bid_df, coi_df])
     score_filepath = os.path.join(args.input_dirpath, "score.xlsx")
